@@ -12,14 +12,16 @@
 
 const BASE_URL = process.env.APP_URL || 'http://localhost:3002';
 const SCAN_INTERVAL_MS = 30 * 60 * 1000;
-const EV_THRESHOLD        = 0.05;    // Min |EV| to open
-const REANALYZE_AFTER     = 6 * 60 * 60 * 1000;   // Don't re-scan same market within 6h
-const REANALYZE_POSITION_AFTER = 4 * 60 * 60 * 1000;  // Re-analyze open position after 4h
-const RESOLUTION_THRESHOLD = 0.94;  // Auto-close if price >= 94% or <= 6%
-const STOP_LOSS_PCT        = 0.50;  // Hard stop-loss at -50%
-const TRAILING_STOP_PCT    = 0.30;  // Trailing stop: 30% from peak
-const TRAILING_ACTIVATE_PCT = 0.15; // Trailing stop activates after +15% gain
-const TAKE_PROFIT_PCT      = 1.50;  // Take-profit at +150% gain
+const EV_THRESHOLD        = 0.07;    // Min |EV| to open (raised from 0.05)
+const REANALYZE_AFTER     = 6 * 60 * 60 * 1000;
+const REANALYZE_POSITION_AFTER = 4 * 60 * 60 * 1000;
+const RESOLUTION_THRESHOLD = 0.94;
+const STOP_LOSS_PCT        = 0.50;
+const TRAILING_STOP_PCT    = 0.30;
+const TRAILING_ACTIVATE_PCT = 0.15;
+const TAKE_PROFIT_PCT      = 1.50;
+const MAX_DRAWDOWN         = 0.08;   // Circuit breaker: halt new positions at 8% drawdown
+const DELTA_THRESHOLD      = 1.0;    // Min δ z-score to open (ignored if < 5 signals)
 
 // ── Market quality filter ────────────────────────────────────────────────────
 const SKIP_PATTERNS = [
@@ -181,11 +183,21 @@ async function scan() {
 
   const portfolio = await get('/api/portfolio').catch(() => null);
   if (portfolio) {
-    log(`💰 Cash: $${portfolio.cash.toFixed(2)} | Invested: $${portfolio.invested.toFixed(2)} | Total: $${portfolio.totalValue.toFixed(2)} | Return: ${portfolio.returnPct >= 0 ? '+' : ''}${portfolio.returnPct}%`);
+    const dd = portfolio.currentDrawdownPct > 0 ? ` | MDD: -${portfolio.currentDrawdownPct.toFixed(1)}%` : '';
+    const pf = portfolio.profitFactor !== null ? ` | PF: ${portfolio.profitFactor}` : '';
+    const bs = portfolio.brierScore !== null ? ` | Brier: ${portfolio.brierScore}` : '';
+    log(`💰 Cash: $${portfolio.cash.toFixed(0)} | Total: $${portfolio.totalValue.toFixed(0)} | Return: ${portfolio.returnPct >= 0 ? '+' : ''}${portfolio.returnPct}%${dd}${pf}${bs}`);
   }
 
   if (!portfolio || portfolio.cash < 5) {
     log('⚠ No cash to deploy');
+    await post('/api/pnl', {}).catch(() => {});
+    return;
+  }
+
+  // MDD circuit breaker — halt new positions if drawdown exceeds threshold
+  if ((portfolio.currentDrawdownPct ?? 0) >= MAX_DRAWDOWN * 100) {
+    log(`🚨 MDD CIRCUIT BREAKER: ${portfolio.currentDrawdownPct?.toFixed(1)}% drawdown (limit ${MAX_DRAWDOWN*100}%) — managing existing, no new opens`);
     await post('/api/pnl', {}).catch(() => {});
     return;
   }
@@ -223,18 +235,24 @@ async function scan() {
 
       const ev = signal.ev ?? (signal.llm_estimate - yesPrice);
       const evPct = (ev * 100).toFixed(1);
+      const delta = signal.delta;
       const newsTag = signal.news_relevant === false ? ' ⚠no-news' : '';
-      log(`  p̂=${signal.llm_estimate?.toFixed(3)} EV=${ev >= 0 ? '+' : ''}${evPct}% conf=${signal.confidence}${newsTag}`);
+      const deltaTag = delta !== null && delta !== undefined ? ` δ=${delta >= 0 ? '+' : ''}${delta.toFixed(2)}σ` : '';
+      log(`  p̂=${signal.llm_estimate?.toFixed(3)} EV=${ev >= 0 ? '+' : ''}${evPct}% conf=${signal.confidence}${deltaTag}${newsTag}`);
 
-      // Skip if confidence is low (no real edge)
+      // Skip if confidence is low
       if (signal.confidence === 'low') {
-        log('  · Low confidence, skipping');
-        continue;
+        log('  · Low confidence, skipping'); continue;
       }
 
-      // Skip if no relevant news and EV seems too good (likely LLM hallucination)
+      // Skip if no relevant news + suspiciously high EV
       if (signal.news_relevant === false && Math.abs(ev) > 0.20) {
-        log('  · No relevant news + suspicious EV → skipping');
+        log('  · No relevant news + suspicious EV → skipping'); continue;
+      }
+
+      // δ filter: if we have enough history, require meaningful z-score
+      if (delta !== null && delta !== undefined && Math.abs(delta) < DELTA_THRESHOLD) {
+        log(`  · δ=${delta.toFixed(2)}σ below ${DELTA_THRESHOLD}σ threshold → skipping`);
         continue;
       }
 

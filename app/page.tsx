@@ -9,7 +9,7 @@ type Outcome = { name: string; price: number };
 type Market = { id: string; question: string; outcomes: Outcome[]; volume: number };
 type Signal = {
   id: string; market_id: string; question: string; outcome: string;
-  market_price: number; llm_estimate: number; ev: number;
+  market_price: number; llm_estimate: number; ev: number; delta?: number | null;
   reasoning: string; news_summary: string; confidence?: string; created_at: number;
 };
 type Position = {
@@ -20,7 +20,12 @@ type Position = {
 };
 type LogLine = { ts: number; message: string };
 type PnlSnap = { ts: number; realized: number; unrealized: number; total: number };
-type Portfolio = { cash: number; invested: number; unrealized: number; totalValue: number; startingCapital: number; realizedPnl: number; returnPct: number; openCount: number };
+type Portfolio = {
+  cash: number; invested: number; unrealized: number; totalValue: number;
+  startingCapital: number; realizedPnl: number; returnPct: number; openCount: number;
+  currentDrawdownPct: number; profitFactor: number | null;
+  brierScore: number | null; brierN: number; winRate: number | null; closedCount: number;
+};
 
 function PnlChart({ data }: { data: PnlSnap[] }) {
   const last = data[data.length - 1];
@@ -284,18 +289,23 @@ export default function Dashboard() {
           {portfolio && (
             <>
               <span className="text-[11px] font-mono text-[#6b6b8a]">
-                💵 <span className="text-[#e2e2f0]">${portfolio.cash.toFixed(0)}</span> cash
+                💵 <span className="text-[#e2e2f0]">${portfolio.cash.toFixed(0)}</span>
               </span>
-              <span className="text-[11px] font-mono text-[#6b6b8a]">
-                📊 <span className={portfolio.returnPct >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+              <span className="text-[11px] font-mono">
+                <span className={portfolio.returnPct >= 0 ? 'text-emerald-400' : 'text-red-400'}>
                   {portfolio.returnPct >= 0 ? '+' : ''}{portfolio.returnPct}%
-                </span> total
-              </span>
-              <span className="text-[11px] font-mono text-[#6b6b8a]">
-                realized: <span className={portfolio.realizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                  {portfolio.realizedPnl >= 0 ? '+' : ''}${portfolio.realizedPnl.toFixed(2)}
                 </span>
               </span>
+              {portfolio.currentDrawdownPct > 0 && (
+                <span className={`text-[11px] font-mono ${portfolio.currentDrawdownPct >= 8 ? 'text-red-500' : 'text-amber-400'}`}>
+                  MDD -{portfolio.currentDrawdownPct.toFixed(1)}%{portfolio.currentDrawdownPct >= 8 ? ' 🚨' : ''}
+                </span>
+              )}
+              {portfolio.profitFactor !== null && (
+                <span className="text-[11px] font-mono text-[#6b6b8a]">
+                  PF <span className={portfolio.profitFactor >= 1.5 ? 'text-emerald-400' : 'text-amber-400'}>{portfolio.profitFactor.toFixed(2)}</span>
+                </span>
+              )}
             </>
           )}
           <span className="text-[11px] text-[#6b6b8a] font-mono">{openPos.length} open · {signals.length} signals</span>
@@ -349,6 +359,14 @@ export default function Dashboard() {
                               {signPct(sig.ev)}
                             </span>
                           </div>
+                          {sig.delta != null && (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="metric-label">δ</span>
+                              <span className={`font-mono text-[11px] ${Math.abs(sig.delta) >= 1.5 ? 'text-emerald-400' : Math.abs(sig.delta) >= 1 ? 'text-amber-400' : 'text-[#6b6b8a]'}`}>
+                                {sig.delta >= 0 ? '+' : ''}{sig.delta.toFixed(1)}σ
+                              </span>
+                            </div>
+                          )}
                           {confBadge(sig.confidence)}
                         </>
                       )}
@@ -417,29 +435,62 @@ export default function Dashboard() {
 
           {/* Capital Stats */}
           {portfolio && (
-            <div className="flex-shrink-0 border-b border-[#1e1e2e] bg-[#111118] px-3 py-2 grid grid-cols-2 gap-x-3 gap-y-1.5">
-              <div>
-                <span className="metric-label block">Portfolio Value</span>
-                <span className={`font-mono text-[13px] font-semibold ${portfolio.returnPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                  ${portfolio.totalValue.toFixed(2)}
-                  <span className="text-[10px] ml-1 opacity-70">({portfolio.returnPct >= 0 ? '+' : ''}{portfolio.returnPct}%)</span>
-                </span>
+            <div className="flex-shrink-0 border-b border-[#1e1e2e] bg-[#111118] px-3 py-2">
+              {/* Row 1: main stats */}
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mb-2">
+                <div>
+                  <span className="metric-label block">Portfolio</span>
+                  <span className={`font-mono text-[13px] font-semibold ${portfolio.returnPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    ${portfolio.totalValue.toFixed(0)}
+                    <span className="text-[10px] ml-1 opacity-70">({portfolio.returnPct >= 0 ? '+' : ''}{portfolio.returnPct}%)</span>
+                  </span>
+                </div>
+                <div>
+                  <span className="metric-label block">Cash</span>
+                  <span className="font-mono text-[13px] text-[#e2e2f0]">${portfolio.cash.toFixed(0)}</span>
+                </div>
+                <div>
+                  <span className="metric-label block">Unrealized</span>
+                  <span className={`font-mono text-[11px] ${(portfolio.unrealized ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {(portfolio.unrealized ?? 0) >= 0 ? '+' : ''}${(portfolio.unrealized ?? 0).toFixed(2)}
+                  </span>
+                </div>
+                <div>
+                  <span className="metric-label block">Realized</span>
+                  <span className={`font-mono text-[11px] ${portfolio.realizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {portfolio.realizedPnl >= 0 ? '+' : ''}${portfolio.realizedPnl.toFixed(2)}
+                  </span>
+                </div>
               </div>
-              <div>
-                <span className="metric-label block">Cash Available</span>
-                <span className="font-mono text-[13px] text-[#e2e2f0]">${portfolio.cash.toFixed(2)}</span>
-              </div>
-              <div>
-                <span className="metric-label block">Unrealized</span>
-                <span className={`font-mono text-[11px] ${(portfolio.unrealized ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {(portfolio.unrealized ?? 0) >= 0 ? '+' : ''}${(portfolio.unrealized ?? 0).toFixed(2)}
-                </span>
-              </div>
-              <div>
-                <span className="metric-label block">Realized P&amp;L</span>
-                <span className={`font-mono text-[11px] ${portfolio.realizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {portfolio.realizedPnl >= 0 ? '+' : ''}${portfolio.realizedPnl.toFixed(2)}
-                </span>
+              {/* Row 2: performance metrics */}
+              <div className="border-t border-[#1e1e2e] pt-1.5 grid grid-cols-4 gap-x-2">
+                <div>
+                  <span className="metric-label block">Drawdown</span>
+                  <span className={`font-mono text-[11px] ${portfolio.currentDrawdownPct > 5 ? 'text-red-400' : portfolio.currentDrawdownPct > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {portfolio.currentDrawdownPct > 0 ? '-' : ''}{portfolio.currentDrawdownPct.toFixed(1)}%
+                    {portfolio.currentDrawdownPct >= 8 && <span className="ml-1 text-red-500">🚨</span>}
+                  </span>
+                </div>
+                <div>
+                  <span className="metric-label block">Profit F.</span>
+                  <span className={`font-mono text-[11px] ${portfolio.profitFactor === null ? 'text-[#6b6b8a]' : portfolio.profitFactor >= 1.5 ? 'text-emerald-400' : portfolio.profitFactor >= 1 ? 'text-amber-400' : 'text-red-400'}`}>
+                    {portfolio.profitFactor !== null ? portfolio.profitFactor.toFixed(2) : '—'}
+                  </span>
+                </div>
+                <div>
+                  <span className="metric-label block">Brier</span>
+                  <span className={`font-mono text-[11px] ${portfolio.brierScore === null ? 'text-[#6b6b8a]' : portfolio.brierScore <= 0.15 ? 'text-emerald-400' : portfolio.brierScore <= 0.25 ? 'text-amber-400' : 'text-red-400'}`}
+                    title={`n=${portfolio.brierN} resolved markets`}>
+                    {portfolio.brierScore !== null ? portfolio.brierScore.toFixed(3) : '—'}
+                  </span>
+                </div>
+                <div>
+                  <span className="metric-label block">Win%</span>
+                  <span className={`font-mono text-[11px] ${portfolio.winRate === null ? 'text-[#6b6b8a]' : portfolio.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {portfolio.winRate !== null ? portfolio.winRate + '%' : '—'}
+                    <span className="text-[9px] ml-0.5 opacity-50">({portfolio.closedCount})</span>
+                  </span>
+                </div>
               </div>
             </div>
           )}

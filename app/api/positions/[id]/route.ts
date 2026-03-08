@@ -32,6 +32,7 @@ export async function PUT(
 
     const pos = db.prepare('SELECT * FROM positions WHERE id = ? AND status = ?').get(id, 'open') as {
       entry_price: number; shares: number; cost: number; outcome: string;
+      market_id: string; question: string;
     } | undefined;
 
     if (!pos) {
@@ -57,8 +58,50 @@ export async function PUT(
       WHERE id = ? AND status = 'open'
     `).run(directionalClosePrice, now, id);
 
-    // Refund cash: return the current market value of the position
+    // Refund cash
     db.prepare('UPDATE portfolio SET cash = cash + ? WHERE id = 1').run(closeValue);
+
+    // Update portfolio peak value if portfolio just hit a new high
+    const portfolio = db.prepare('SELECT cash, peak_value FROM portfolio WHERE id = 1').get() as
+      { cash: number; peak_value: number } | undefined;
+    if (portfolio) {
+      const openInvested = (db.prepare("SELECT COALESCE(SUM(cost),0) as s FROM positions WHERE status='open'").get() as {s:number}).s;
+      const currentTotal = portfolio.cash + openInvested;
+      if (currentTotal > (portfolio.peak_value ?? 0)) {
+        db.prepare('UPDATE portfolio SET peak_value = ? WHERE id = 1').run(currentTotal);
+      }
+    }
+
+    // Record Brier score if market clearly resolved (price near 0 or 1)
+    const RESOLVED_THRESHOLD = 0.94;
+    const isResolved = directionalClosePrice >= RESOLVED_THRESHOLD || directionalClosePrice <= (1 - RESOLVED_THRESHOLD);
+    if (isResolved) {
+      const signal = db.prepare(
+        'SELECT llm_estimate FROM signals WHERE market_id = ? ORDER BY created_at DESC LIMIT 1'
+      ).get(pos.market_id as string) as { llm_estimate: number } | undefined;
+
+      if (signal?.llm_estimate != null) {
+        // actual_outcome: did YES resolve? 1 = YES won, 0 = NO won
+        // For YES position: directionalClosePrice >= 0.94 → YES won → 1
+        // For NO position:  directionalClosePrice <= 0.06 → NO won (YES lost) → 0
+        //                   directionalClosePrice >= 0.94 → NO lost (YES won) → 1
+        // Actually: regardless of position direction, track YES outcome
+        // We need the yes_close_price: for YES pos it's directionalClosePrice, for NO it's 1-directionalClosePrice
+        const yesClosePrice = isNo ? 1 - directionalClosePrice : directionalClosePrice;
+        const actualYesOutcome = yesClosePrice >= RESOLVED_THRESHOLD ? 1 : 0;
+        const llmYesEstimate = signal.llm_estimate;
+        const brierScore = (llmYesEstimate - actualYesOutcome) ** 2;
+
+        db.prepare(`
+          INSERT INTO brier_scores (id, market_id, position_id, question, llm_estimate, actual_outcome, score)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          crypto.randomUUID(), pos.market_id, id,
+          pos.question,
+          llmYesEstimate, actualYesOutcome, brierScore
+        );
+      }
+    }
 
     const position = db.prepare('SELECT * FROM positions WHERE id = ?').get(id);
     emit('position', { type: 'closed', position });
