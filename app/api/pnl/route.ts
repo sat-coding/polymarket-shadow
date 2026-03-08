@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
 
     let currentPrice: number;
     if (pos.status === 'closed') {
+      // close_price is stored directionally (same direction as entry_price)
       currentPrice = pos.close_price ?? pos.entry_price;
     } else if (rawCurrentYes !== undefined) {
       currentPrice = isNo ? 1 - rawCurrentYes : rawCurrentYes;

@@ -29,6 +29,8 @@ export async function GET() {
   // current market value ≈ invested + unrealized
   const totalValue = cash + invested + unrealized;
 
+  // close_price is stored directionally (same as entry_price direction)
+  // so simple formula works for all outcomes
   const realizedPnl = db.prepare(
     "SELECT COALESCE(SUM((close_price - entry_price) * shares), 0) as pnl FROM positions WHERE status = 'closed'"
   ).get() as { pnl: number };

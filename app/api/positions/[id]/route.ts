@@ -46,11 +46,16 @@ export async function PUT(
       ? (1 - closePrice) * pos.shares
       : closePrice * pos.shares;
 
+    // Store close_price in the same direction as entry_price
+    // entry_price is always the position-direction price (YES price for YES, NO price for NO)
+    // so close_price should also be the position-direction price
+    const directionalClosePrice = isNo ? 1 - closePrice : closePrice;
+
     db.prepare(`
       UPDATE positions
       SET status = 'closed', close_price = ?, closed_at = ?
       WHERE id = ? AND status = 'open'
-    `).run(closePrice, now, id);
+    `).run(directionalClosePrice, now, id);
 
     // Refund cash: return the current market value of the position
     db.prepare('UPDATE portfolio SET cash = cash + ? WHERE id = 1').run(closeValue);
