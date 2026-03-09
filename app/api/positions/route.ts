@@ -80,9 +80,10 @@ export async function POST(req: NextRequest) {
       confidence?: 'low' | 'medium' | 'high';
       shares?: number;
       halfSize?: boolean;
+      maxCost?: number;
     };
 
-    const { marketId, question, outcome, entryPrice, llmEstimate, confidence, shares: sharesOverride, halfSize } = body;
+    const { marketId, question, outcome, entryPrice, llmEstimate, confidence, shares: sharesOverride, halfSize, maxCost } = body;
 
     if (!marketId || !question || !outcome || entryPrice == null) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -112,6 +113,8 @@ export async function POST(req: NextRequest) {
       const maxBet = cash * MAX_POSITION_PCT; // never more than 7% per trade
       let finalBet = Math.max(minBet, Math.min(betAmount, maxBet));
       if (halfSize) finalBet = Math.max(minBet, finalBet * 0.5);
+      // V4: respect maxCost from scanner
+      if (maxCost && finalBet > maxCost) finalBet = maxCost;
       shares = Math.max(1, Math.floor(finalBet / entryPrice));
       cost = entryPrice * shares;
     } else {
