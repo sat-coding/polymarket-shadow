@@ -321,15 +321,24 @@ export default function Dashboard() {
 
           {/* Scanner */}
           <div className="flex flex-col flex-1 overflow-hidden border-b border-[#1e1e2e]">
-            <div className="panel-header">
+            <div className="panel-header panel-header--accent-amber">
               <span className="panel-label">Scanner</span>
               <span className="badge-count">{markets.length}</span>
               <span className="ml-auto text-[10px] text-[#6b6b8a] font-mono">click to analyze</span>
             </div>
             <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1.5">
               {markets.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full gap-2 text-[#6b6b8a] text-xs">
-                  <span className="text-2xl opacity-30">◌</span>Loading markets…
+                <div className="flex flex-col gap-1.5">
+                  {[80,65,72,58,75,60].map((w,i) => (
+                    <div key={i} className="skeleton-row">
+                      <div className="skeleton h-3" style={{width:`${w}%`}} />
+                      <div className="flex gap-3">
+                        <div className="skeleton h-2.5 w-12" />
+                        <div className="skeleton h-2.5 w-10" />
+                        <div className="skeleton h-2.5 w-14" />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : markets.map(m => {
                 const yes = m.outcomes.find(o => o.name === 'Yes');
@@ -395,14 +404,18 @@ export default function Dashboard() {
 
           {/* Signals */}
           <div className="flex flex-col" style={{ height: '220px' }}>
-            <div className="panel-header">
+            <div className="panel-header panel-header--accent-indigo">
               <span className="panel-label">Signal History</span>
               <span className="badge-count">{signals.length}</span>
             </div>
             <div className="flex-1 overflow-y-auto p-2">
               {signals.length === 0 ? (
-                <div className="flex items-center justify-center h-full text-[#6b6b8a] text-xs gap-2">
-                  <span className="opacity-30">◌</span> No signals yet
+                <div className="flex flex-col items-center justify-center h-full gap-2 text-[#3d3d5c]">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" opacity="0.4">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                  </svg>
+                  <span className="text-[11px] text-[#6b6b8a]">No signals yet</span>
+                  <span className="text-[10px] text-[#3d3d5c]">Click a market to analyze</span>
                 </div>
               ) : (
                 <div className="flex flex-col gap-1">
@@ -502,16 +515,18 @@ export default function Dashboard() {
 
           {/* Positions */}
           <div className="flex flex-col flex-1 overflow-hidden border-b border-[#1e1e2e]">
-            <div className="panel-header">
+            <div className="panel-header panel-header--accent-green">
               <span className="panel-label">Positions</span>
               <span className="badge-count">{openPos.length} open</span>
             </div>
             <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1.5">
               {openPos.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full gap-1.5 text-[#6b6b8a] text-xs">
-                  <span className="text-2xl opacity-30">◌</span>
-                  <span>No open positions</span>
-                  <span className="text-[10px]">Click + Open on a signal</span>
+                <div className="flex flex-col items-center justify-center h-full gap-2 text-[#3d3d5c]">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" opacity="0.4">
+                    <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+                  </svg>
+                  <span className="text-[11px] text-[#6b6b8a]">No open positions</span>
+                  <span className="text-[10px] text-[#3d3d5c]">Analyze a market to find edge</span>
                 </div>
               ) : openPos.map(pos => {
                 const isNo = pos.outcome?.toLowerCase() === 'no';
@@ -557,9 +572,12 @@ export default function Dashboard() {
 
           {/* Log */}
           <div className="flex flex-col" style={{ height: '180px' }}>
-            <div className="panel-header">
+            <div className="panel-header panel-header--accent-gray">
               <span className="panel-label">Agent Log</span>
-              <span className="ml-auto font-mono text-[10px] text-[#6b6b8a]">live</span>
+              <div className="ml-auto flex items-center gap-1.5">
+                <span className="live-dot" />
+                <span className="font-mono text-[10px] text-emerald-600">live</span>
+              </div>
             </div>
             <div ref={logRef} className="flex-1 overflow-y-auto px-3 py-2 flex flex-col gap-0.5">
               {log.length === 0

@@ -76,7 +76,7 @@ ${noNews ? '5. NOTE: No relevant news found. Stay within ±0.05 of market price.
 Return JSON only: {"estimate": 0.XX, "confidence": "low|medium|high", "reasoning": "1-2 sentences citing specific evidence", "news_summary": "1 sentence", "news_relevant": true|false}`;
 
   const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5',
+    model: 'claude-sonnet-4-20250514',
     max_tokens: 256,
     messages: [{ role: 'user', content: prompt }],
   });

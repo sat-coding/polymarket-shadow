@@ -12,7 +12,8 @@
 
 const BASE_URL = process.env.APP_URL || 'http://localhost:3002';
 const SCAN_INTERVAL_MS = 30 * 60 * 1000;
-const EV_THRESHOLD        = 0.07;    // Min |EV| to open (raised from 0.05)
+const EV_THRESHOLD        = 0.12;    // Min |EV| to open (raised from 0.07 after hit-rate < 40%)
+const MAX_ENTRY_PRICE     = 0.88;    // Skip near-certainty bets (e.g. No@0.945 → catastrophic if wrong)
 const REANALYZE_AFTER     = 6 * 60 * 60 * 1000;
 const REANALYZE_POSITION_AFTER = 4 * 60 * 60 * 1000;
 const RESOLUTION_THRESHOLD = 0.94;
@@ -33,10 +34,18 @@ const SKIP_PATTERNS = [
   /\btemperature\b/i,
   /\bhighest temp/i,
   /\$[\d,]+[bBmMkK]?[-–]\$[\d,]+[bBmMkK]?/, // Narrow $ range: $700b-$710b
+  /between \$[\d,.]+\s+and\s+\$[\d,.]+/i,    // Narrow $ range: between $1.40 and $1.50
   /\b\d{1,4}[°]\b/,         // e.g. 24° 
   /\bhandicap:/i,
   /map handicap/i,
   /\btotals?\b.*\d+\.5/i,   // Totals 6.5, 7.5 etc
+  /\blove is blind\b/i,      // Reality TV
+  /\bmarried at first sight\b/i,
+  /\bbachelor(ette)?\b/i,
+  /\bget engaged\b/i,        // Reality TV engagement markets
+  /\bget married\b/i,        // Reality TV marriage markets
+  /\bsurvivor\b.*voted/i,
+  /\bvisit(ed)?\s+(epstein|island)/i,  // Celebrity speculation without resolution criteria
 ];
 
 function isLowQualityMarket(question) {
@@ -240,6 +249,11 @@ async function scan() {
       const deltaTag = delta !== null && delta !== undefined ? ` δ=${delta >= 0 ? '+' : ''}${delta.toFixed(2)}σ` : '';
       log(`  p̂=${signal.llm_estimate?.toFixed(3)} EV=${ev >= 0 ? '+' : ''}${evPct}% conf=${signal.confidence}${deltaTag}${newsTag}`);
 
+      // Guard: skip if LLM returned undefined/NaN (malformed response)
+      if (signal.llm_estimate == null || isNaN(ev) || signal.confidence == null) {
+        log('  · Malformed LLM response (NaN/undefined), skipping'); continue;
+      }
+
       // Skip if confidence is low
       if (signal.confidence === 'low') {
         log('  · Low confidence, skipping'); continue;
@@ -257,6 +271,12 @@ async function scan() {
       }
 
       if (Math.abs(ev) < EV_THRESHOLD) { log('  · Below threshold'); continue; }
+
+      // Skip near-certainty bets — tiny upside, catastrophic if wrong (e.g. GA-04 No@0.945)
+      const entryPriceCheck = ev > 0 ? yesPrice : parseFloat((1 - yesPrice).toFixed(4));
+      if (entryPriceCheck > MAX_ENTRY_PRICE) {
+        log(`  · Entry price ${entryPriceCheck.toFixed(3)} > ${MAX_ENTRY_PRICE} (near-certainty, skipping)`); continue;
+      }
 
       if (openPositions.some(p => p.market_id === market.id && p.status === 'open')) {
         log('  · Already have position'); continue;
