@@ -58,12 +58,15 @@ export async function GET() {
 
 // Kelly criterion position sizing
 // confidence multiplier: high=1.0, medium=0.4, low=0.1
+const KELLY_CAP = 0.07;        // Max fraction per trade (must match scanner.mjs)
+const MAX_POSITION_PCT = 0.07; // Max % of cash per single position
+
 function kellyFraction(p: number, price: number, confidence: 'low'|'medium'|'high' = 'medium'): number {
   const b = (1 - price) / price;
   const q = 1 - p;
   const kelly = (p * b - q) / b;
   const confMult = confidence === 'high' ? 1.0 : confidence === 'medium' ? 0.4 : 0.1;
-  return Math.max(0, Math.min(kelly * 0.25 * confMult, 0.10));
+  return Math.max(0, Math.min(kelly * 0.25 * confMult, KELLY_CAP));
 }
 
 export async function POST(req: NextRequest) {
@@ -76,9 +79,10 @@ export async function POST(req: NextRequest) {
       llmEstimate?: number;
       confidence?: 'low' | 'medium' | 'high';
       shares?: number;
+      halfSize?: boolean;
     };
 
-    const { marketId, question, outcome, entryPrice, llmEstimate, confidence, shares: sharesOverride } = body;
+    const { marketId, question, outcome, entryPrice, llmEstimate, confidence, shares: sharesOverride, halfSize } = body;
 
     if (!marketId || !question || !outcome || entryPrice == null) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -105,8 +109,9 @@ export async function POST(req: NextRequest) {
       const fraction = kellyFraction(llmEstimate, entryPrice, confidence ?? 'medium');
       const betAmount = fraction * cash;
       const minBet = Math.min(5, cash); // at least $5 if we have it
-      const maxBet = cash * 0.10; // never more than 10% per trade
-      const finalBet = Math.max(minBet, Math.min(betAmount, maxBet));
+      const maxBet = cash * MAX_POSITION_PCT; // never more than 7% per trade
+      let finalBet = Math.max(minBet, Math.min(betAmount, maxBet));
+      if (halfSize) finalBet = Math.max(minBet, finalBet * 0.5);
       shares = Math.max(1, Math.floor(finalBet / entryPrice));
       cost = entryPrice * shares;
     } else {

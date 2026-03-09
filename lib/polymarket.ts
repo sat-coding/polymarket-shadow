@@ -23,8 +23,9 @@ type RawMarket = {
 
 export async function fetchTopMarkets(): Promise<Market[]> {
   // Sort by liquidity (active market-making) not historical volume
+  // Fetch more markets — domain filter (weather/geo/crypto) is strict, need wider pool
   const url =
-    'https://gamma-api.polymarket.com/markets?limit=100&order=liquidity&ascending=false&active=true';
+    'https://gamma-api.polymarket.com/markets?limit=500&order=liquidity&ascending=false&active=true';
 
   const res = await fetch(url, {
     headers: { 'Accept': 'application/json' },
@@ -80,8 +81,8 @@ export async function fetchTopMarkets(): Promise<Market[]> {
         ],
       });
 
-      // Return top 30 active markets
-      if (markets.length >= 30) break;
+      // Return top 100 active markets (domain filter will narrow further)
+      if (markets.length >= 100) break;
     } catch {
       // skip malformed markets
     }

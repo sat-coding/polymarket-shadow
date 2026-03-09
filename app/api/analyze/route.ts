@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { analyzeMarket } from '@/lib/analyzer';
 import { getDb } from '@/lib/db';
 import { emit } from '@/lib/emitter';
+import { estimateWeatherProbability } from '@/lib/weather-oracle';
+import { classifyMarket } from '@/lib/domain-filter';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +40,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const result = await analyzeMarket(question, price);
+    // Route weather markets to data oracle (no LLM needed)
+    const domain = classifyMarket(question);
+    let result: { estimate: number; reasoning: string; news_summary: string; confidence: string; news_relevant: boolean };
+
+    if (domain === 'weather') {
+      const weatherResult = await estimateWeatherProbability(question);
+      if (weatherResult) {
+        result = {
+          estimate: weatherResult.probability,
+          reasoning: `[WEATHER ORACLE] ${weatherResult.reasoning}`,
+          news_summary: `GFS forecast for ${weatherResult.city} on ${weatherResult.date}: high=${weatherResult.forecast.highC}°C low=${weatherResult.forecast.lowC}°C`,
+          confidence: weatherResult.confidence,
+          news_relevant: true, // weather data is always "relevant"
+        };
+      } else {
+        // Couldn't parse weather question, fall back to LLM
+        result = await analyzeMarket(question, price);
+      }
+    } else {
+      result = await analyzeMarket(question, price);
+    }
+
     const ev = result.estimate - price;
 
     const db = getDb();

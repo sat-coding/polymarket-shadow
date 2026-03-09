@@ -203,13 +203,26 @@ export default function Dashboard() {
 
   useEffect(() => {
     const es = new EventSource('/api/events/stream');
+    // Named SSE events (emitter sends: event: signal\ndata: ...)
+    const handleEvent = (type: string) => (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (type === 'log') addLog(data.message || JSON.stringify(data));
+        if (type === 'signal') { addLog(`📡 Signal: ${data.question?.slice(0,45)} EV=${(data.ev*100).toFixed(1)}% [${data.confidence}]`); loadSignals(); loadPositions(); loadPortfolio(); }
+        if (type === 'position') { addLog(`💼 Position ${data.type}: ${data.position?.question?.slice(0,40) || ''}`); loadPositions(); loadPortfolio(); }
+        if (type === 'portfolio') { loadPortfolio(); }
+      } catch {}
+    };
+    es.addEventListener('log', handleEvent('log'));
+    es.addEventListener('signal', handleEvent('signal'));
+    es.addEventListener('position', handleEvent('position'));
+    es.addEventListener('portfolio', handleEvent('portfolio'));
+    // Fallback for unnamed events
     es.onmessage = (e) => {
       if (e.data === 'ping') return;
       try {
         const ev = JSON.parse(e.data);
         if (ev.type === 'log') addLog(ev.message);
-        if (ev.type === 'signal') { loadSignals(); loadPositions(); loadPortfolio(); }
-        if (ev.type === 'position') { loadPositions(); loadPortfolio(); }
       } catch {}
     };
     es.onerror = () => addLog('⚠ SSE reconnecting…');

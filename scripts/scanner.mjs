@@ -21,7 +21,8 @@ const STOP_LOSS_PCT        = 0.50;
 const TRAILING_STOP_PCT    = 0.30;
 const TRAILING_ACTIVATE_PCT = 0.15;
 const TAKE_PROFIT_PCT      = 1.50;
-const MAX_DRAWDOWN         = 0.08;   // Circuit breaker: halt new positions at 8% drawdown
+const DRAWDOWN_DEGRADED    = 0.08;   // Degraded mode: high conf + EV>20% only, half size
+const DRAWDOWN_HALT        = 0.12;   // Full halt: no new positions at all
 const DELTA_THRESHOLD      = 1.0;    // Min δ z-score to open (ignored if < 5 signals)
 
 // ── Market quality filter ────────────────────────────────────────────────────
@@ -50,6 +51,39 @@ const SKIP_PATTERNS = [
 
 function isLowQualityMarket(question) {
   return SKIP_PATTERNS.some(p => p.test(question));
+}
+
+// ── Domain focus filter (V3) ─────────────────────────────────────────────────
+// Only trade: weather, geopolitics/policy, crypto price levels
+const WEATHER_PAT = [/\b(highest|lowest|high|low)\s+temp/i, /°[CF]\b/, /\btemperature\b/i, /\bprecipitation\b/i];
+const GEO_PAT = [
+  /\b(war|strike|bomb|invade|invasion|ceasefire|truce)\b/i,
+  /\b(sanction|tariff|trade (deal|war|ban))\b/i,
+  /\b(nuclear|missile|weapon)\b/i, /\b(embassy|diplomat)\b/i,
+  /\b(NATO|UN Security|G7|G20|EU)\b/i,
+  /\b(impeach|indictment|convicted|sentenced|resign)\b/i,
+  /\b(election|vote|ballot|primary|runoff)\b/i,
+  /\b(executive order|bill pass|legislation|veto)\b/i,
+  /\b(interest rate|rate cut|rate hike)\b/i,
+  /\b(Fed |Federal Reserve|ECB|Bank of England|Bank of Japan)\b/i,
+  /\b(GDP|recession|CPI|inflation|unemployment rate)\b/i,
+  /\b(successor|Khamenei|Putin|Zelensky|Netanyahu)\b/i,
+];
+const CRYPTO_PAT = [
+  /\b(Bitcoin|BTC|Ethereum|ETH|XRP|Solana|SOL|Dogecoin)\b.*\$[\d,]+/i,
+  /\b(dip to|reach|above|below|hit)\s*\$[\d,]+/i,
+  /\bmarket cap\b.*\$[\d,]+/i,
+];
+
+function classifyDomain(question) {
+  if (WEATHER_PAT.some(p => p.test(question))) return 'weather';
+  if (GEO_PAT.some(p => p.test(question))) return 'geopolitics';
+  if (CRYPTO_PAT.some(p => p.test(question))) return 'crypto';
+  return 'skip';
+}
+
+function isDomainAllowed(question) {
+  return classifyDomain(question) !== 'skip';
 }
 
 // ── Kelly criterion ──────────────────────────────────────────────────────────
@@ -204,11 +238,16 @@ async function scan() {
     return;
   }
 
-  // MDD circuit breaker — halt new positions if drawdown exceeds threshold
-  if ((portfolio.currentDrawdownPct ?? 0) >= MAX_DRAWDOWN * 100) {
-    log(`🚨 MDD CIRCUIT BREAKER: ${portfolio.currentDrawdownPct?.toFixed(1)}% drawdown (limit ${MAX_DRAWDOWN*100}%) — managing existing, no new opens`);
+  // MDD circuit breaker — graduated response
+  const ddPct = (portfolio.currentDrawdownPct ?? 0) / 100;
+  let tradingMode = 'normal';
+  if (ddPct >= DRAWDOWN_HALT) {
+    log(`🚨 MDD FULL HALT: ${(ddPct*100).toFixed(1)}% drawdown (limit ${DRAWDOWN_HALT*100}%) — no new opens`);
     await post('/api/pnl', {}).catch(() => {});
     return;
+  } else if (ddPct >= DRAWDOWN_DEGRADED) {
+    tradingMode = 'degraded';
+    log(`⚠️ MDD DEGRADED MODE: ${(ddPct*100).toFixed(1)}% drawdown — high conf + EV>20% only, half size`);
   }
 
   const markets = await get('/api/markets').catch(e => { log(`ERROR: ${e.message}`); return []; });
@@ -217,15 +256,23 @@ async function scan() {
   // Apply quality filter FIRST
   const qualityMarkets = markets.filter(m => {
     if (isLowQualityMarket(m.question)) {
-      log(`  ⊘ Skipped (low quality): ${m.question.slice(0, 55)}`);
       return false;
     }
     return true;
   });
 
-  const toAnalyze = qualityMarkets.filter(m => now - (analyzed.get(m.id) ?? 0) > REANALYZE_AFTER);
+  // Apply domain focus filter — only weather/geopolitics/crypto
+  const domainMarkets = qualityMarkets.filter(m => {
+    const domain = classifyDomain(m.question);
+    if (domain === 'skip') {
+      return false;
+    }
+    return true;
+  });
 
-  log(`${markets.length} markets | ${qualityMarkets.length} pass quality filter | ${toAnalyze.length} to analyze`);
+  const toAnalyze = domainMarkets.filter(m => now - (analyzed.get(m.id) ?? 0) > REANALYZE_AFTER);
+
+  log(`${markets.length} markets | ${qualityMarkets.length} quality | ${domainMarkets.length} domain focus | ${toAnalyze.length} to analyze`);
   if (!toAnalyze.length) { log('=== Nothing new ==='); await post('/api/pnl', {}).catch(() => {}); return; }
 
   const openPositions = await get('/api/positions').catch(() => []);
@@ -272,6 +319,14 @@ async function scan() {
 
       if (Math.abs(ev) < EV_THRESHOLD) { log('  · Below threshold'); continue; }
 
+      // Degraded mode gate: only high confidence + EV>20%
+      if (tradingMode === 'degraded') {
+        if (signal.confidence !== 'high' || Math.abs(ev) < 0.20) {
+          log(`  · DEGRADED MODE: need high conf + EV>20%, got ${signal.confidence}/${(Math.abs(ev)*100).toFixed(0)}% → skipping`);
+          continue;
+        }
+      }
+
       // Skip near-certainty bets — tiny upside, catastrophic if wrong (e.g. GA-04 No@0.945)
       const entryPriceCheck = ev > 0 ? yesPrice : parseFloat((1 - yesPrice).toFixed(4));
       if (entryPriceCheck > MAX_ENTRY_PRICE) {
@@ -286,12 +341,14 @@ async function scan() {
       const outcome = buyYes ? 'Yes' : 'No';
       const entryPrice = buyYes ? yesPrice : parseFloat((1 - yesPrice).toFixed(4));
 
-      log(`  ★ Opening ${outcome} @ ${entryPrice.toFixed(3)} (EV ${ev >= 0 ? '+' : ''}${evPct}% conf=${signal.confidence})`);
+      const modeTag = tradingMode === 'degraded' ? ' [DEGRADED ½]' : '';
+      log(`  ★ Opening ${outcome} @ ${entryPrice.toFixed(3)} (EV ${ev >= 0 ? '+' : ''}${evPct}% conf=${signal.confidence})${modeTag}`);
 
       const result = await post('/api/positions', {
         marketId: market.id, question: market.question,
         outcome, entryPrice, llmEstimate: signal.llm_estimate,
         confidence: signal.confidence,
+        halfSize: tradingMode === 'degraded',
       });
 
       if (result.error) {
