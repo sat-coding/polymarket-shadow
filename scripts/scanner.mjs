@@ -23,7 +23,7 @@ const TRAILING_ACTIVATE_PCT = 0.15;
 const TAKE_PROFIT_PCT      = 1.50;
 const DRAWDOWN_DEGRADED    = 0.08;   // Degraded mode: high conf + EV>20% only, half size
 const DRAWDOWN_HALT        = 0.12;   // Full halt: no new positions at all
-const DELTA_THRESHOLD      = 1.0;    // Min δ z-score to open (ignored if < 5 signals)
+const DELTA_THRESHOLD      = 0.5;    // Min δ z-score to open (ignored if < 5 signals) — lowered from 1.0, was blocking good trades
 
 // ── Market quality filter ────────────────────────────────────────────────────
 const SKIP_PATTERNS = [
@@ -314,7 +314,9 @@ async function scan() {
         continue;
       }
 
-      if (Math.abs(ev) < EV_THRESHOLD) { log('  · Below threshold'); continue; }
+      // Tiered EV threshold: high conf → 0.10, medium → 0.12
+      const evThresh = signal.confidence === 'high' ? 0.10 : EV_THRESHOLD;
+      if (Math.abs(ev) < evThresh) { log(`  · Below threshold (${(evThresh*100)}%)`); continue; }
 
       // Degraded mode gate: only high confidence + EV>20%
       if (tradingMode === 'degraded') {

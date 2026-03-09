@@ -73,12 +73,12 @@ BASE RATE ANCHORING (do this FIRST before estimating):
 4. Only deviate from market price if you have SPECIFIC, RECENT evidence that the crowd hasn't priced in yet.
 
 CALIBRATION RULES (critical):
-1. If the news results are irrelevant, off-topic, or empty: you have NO informational edge. Set confidence="low" and estimate within ±0.03 of the current market price. Do NOT invent probabilities.
+1. If the news results are irrelevant, off-topic, or empty: you have limited edge. Set confidence="low" UNLESS you have strong prior knowledge about this event type. Estimate within ±0.05 of the current market price when unsure.
 2. Only set confidence="high" if you found 2+ directly relevant, recent news items that give you genuine edge over the market.
 3. If you're unsure about specific facts: default to confidence="low".
 4. State your base rate estimate BEFORE looking at market price. Then update toward market price unless you have strong evidence.
 5. Overconfidence kills: when in doubt, stay closer to market price.
-${noNews ? '6. NOTE: No relevant news found. Stay within ±0.03 of market price. confidence MUST be "low".' : ''}
+${noNews ? '6. NOTE: No relevant news found. Stay within ±0.05 of market price unless you have strong domain knowledge about this event type.' : ''}
 
 Return JSON only: {"estimate": 0.XX, "confidence": "low|medium|high", "reasoning": "1-2 sentences citing specific evidence", "news_summary": "1 sentence", "news_relevant": true|false}`;
 
