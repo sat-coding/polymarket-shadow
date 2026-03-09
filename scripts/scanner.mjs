@@ -69,11 +69,8 @@ const GEO_PAT = [
   /\b(GDP|recession|CPI|inflation|unemployment rate)\b/i,
   /\b(successor|Khamenei|Putin|Zelensky|Netanyahu)\b/i,
 ];
-const CRYPTO_PAT = [
-  /\b(Bitcoin|BTC|Ethereum|ETH|XRP|Solana|SOL|Dogecoin)\b.*\$[\d,]+/i,
-  /\b(dip to|reach|above|below|hit)\s*\$[\d,]+/i,
-  /\bmarket cap\b.*\$[\d,]+/i,
-];
+// Crypto DISABLED — LLM has no edge on price prediction
+const CRYPTO_PAT = [];
 
 function classifyDomain(question) {
   if (WEATHER_PAT.some(p => p.test(question))) return 'weather';

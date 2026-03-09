@@ -34,13 +34,11 @@ const GEOPOLITICS_PATTERNS = [
   /\b(successor|Khamenei|Putin|Zelensky|Netanyahu|Modi|Xi)\b/i,
 ];
 
-const CRYPTO_PRICE_PATTERNS = [
-  /\b(Bitcoin|BTC)\b.*\$[\d,]+/i,
-  /\b(Ethereum|ETH)\b.*\$[\d,]+/i,
-  /\b(XRP|Solana|SOL|Dogecoin|DOGE)\b.*\$[\d,]+/i,
-  /\bcrypto\b.*\$[\d,]+/i,
-  /\b(dip to|reach|above|below|hit)\s*\$[\d,]+/i,
-  /\bmarket cap\b.*\$[\d,]+/i,
+// Crypto DISABLED — LLM has no edge on price prediction, consistent losses
+// Keep patterns for future reference if we add data oracle (e.g. options-implied probabilities)
+const CRYPTO_PRICE_PATTERNS: RegExp[] = [
+  // /\b(Bitcoin|BTC)\b.*\$[\d,]+/i,
+  // /\b(Ethereum|ETH)\b.*\$[\d,]+/i,
 ];
 
 export type DomainCategory = 'weather' | 'geopolitics' | 'crypto' | 'skip';
